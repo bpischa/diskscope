@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DiskScope</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --border: #2a2d3a;
+    --text: #e2e4ed;
+    --text-dim: #8b8fa3;
+    --accent: #6c8cff;
+    --accent-hover: #829dff;
+    --danger: #ff6b6b;
+    --success: #51cf66;
+    --warn: #ffd43b;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* Header */
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .header h1 {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+  }
+  .header h1 span { color: var(--accent); }
+  .header .spacer { flex: 1; }
+  .path-input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    width: 320px;
+    outline: none;
+  }
+  .path-input:focus { border-color: var(--accent); }
+  .btn {
+    padding: 7px 16px;
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-secondary { background: var(--border); color: var(--text); }
+  .btn-secondary:hover { background: #3a3d4a; }
+  .btn-danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+  .btn-danger:hover { background: rgba(255,107,107,0.1); }
+
+  /* Toolbar */
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .toolbar label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-dim);
+    cursor: pointer;
+  }
+  .toolbar input[type="checkbox"] {
+    accent-color: var(--accent);
+  }
+  .toolbar .status {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-left: auto;
+  }
+  .toolbar .status.scanning { color: var(--warn); }
+  .toolbar .status.ready { color: var(--success); }
+
+  /* Breadcrumbs */
+  .breadcrumbs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 20px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    flex-shrink: 0;
+    overflow-x: auto;
+  }
+  .breadcrumbs .crumb {
+    color: var(--accent);
+    cursor: pointer;
+    white-space: nowrap;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  .breadcrumbs .crumb:hover { background: rgba(108,140,255,0.1); }
+  .breadcrumbs .sep { color: var(--text-dim); }
+  .breadcrumbs .crumb.current { color: var(--text); cursor: default; }
+  .breadcrumbs .crumb.current:hover { background: transparent; }
+
+  /* Treemap */
+  #chart {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+  }
+  #chart svg { width: 100%; height: 100%; }
+
+  .node {
+    stroke: var(--bg);
+    stroke-width: 1.5;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  .node:hover { opacity: 0.85; }
+  .node-label {
+    font-size: 11px;
+    fill: #fff;
+    pointer-events: none;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+    font-weight: 500;
+  }
+  .node-label.small { font-size: 9px; }
+
+  /* Tooltip */
+  .tooltip {
+    position: absolute;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12px;
+    pointer-events: none;
+    z-index: 100;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    max-width: 360px;
+    line-height: 1.5;
+  }
+  .tooltip .name { font-weight: 600; margin-bottom: 4px; word-break: break-all; }
+  .tooltip .size { color: var(--accent); }
+  .tooltip .path { color: var(--text-dim); font-size: 11px; word-break: break-all; }
+
+  /* Legend */
+  .legend {
+    position: absolute;
+    bottom: 16px;
+    right: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .legend .bar { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+  .legend .swatch { width: 12px; height: 12px; border-radius: 2px; }
+
+  /* Loading overlay */
+  .overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(15,17,23,0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    backdrop-filter: blur(2px);
+  }
+  .overlay .spinner {
+    width: 36px; height: 36px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  .overlay .msg {
+    margin-top: 12px;
+    font-size: 14px;
+    color: var(--text-dim);
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Elevation banner */
+  .elevate-banner {
+    background: rgba(255,212,59,0.1);
+    border: 1px solid var(--warn);
+    border-radius: 8px;
+    padding: 10px 16px;
+    margin: 8px 20px;
+    font-size: 13px;
+    color: var(--warn);
+    display: none;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  .elevate-banner.show { display: flex; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Disk<span>Scope</span></h1>
+  <span class="spacer"></span>
+  <input class="path-input" id="pathInput" placeholder="Path to scan..." />
+  <button class="btn btn-secondary" id="refreshBtn" title="Refresh current scan">Refresh</button>
+  <button class="btn btn-primary" id="scanBtn">Scan Home</button>
+  <button class="btn btn-danger" id="fullDiskBtn">Full Disk</button>
+</div>
+
+<div class="toolbar">
+  <label><input type="checkbox" id="excludeToggle" checked /> Exclude common dirs (node_modules, .git, etc.)</label>
+  <span class="status" id="status">Ready</span>
+</div>
+
+<div class="elevate-banner" id="elevateBanner">
+  <span id="elevateMsg">Full disk scan requires elevated permissions.</span>
+  <button class="btn btn-primary" id="elevateBtn" style="margin-left:auto">Elevate</button>
+</div>
+
+<div class="breadcrumbs" id="breadcrumbs"></div>
+
+<div id="chart">
+  <div class="overlay" id="overlay">
+    <div>
+      <div class="spinner"></div>
+      <div class="msg" id="overlayMsg">Scanning...</div>
+    </div>
+  </div>
+  <div class="tooltip" id="tooltip" style="display:none"></div>
+  <div class="legend" id="legend" style="display:none">
+    <div>Size</div>
+    <div class="bar"><div class="swatch" style="background:#6c8cff"></div> Large</div>
+    <div class="bar"><div class="swatch" style="background:#3d5a99"></div> Small</div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmt = bytes => {
+  if (bytes === 0) return '0 B';
+  const units = ['B','KB','MB','GB','TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return (bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
+};
+
+let currentData = null;
+let currentPath = '';
+let zoomStack = []; // stack of { node, path }
+
+async function scan(path, fullDisk) {
+  $('overlay').style.display = 'flex';
+  $('status').textContent = 'Scanning...';
+  $('status').className = 'status scanning';
+  $('elevateBanner').classList.remove('show');
+
+  try {
+    const res = await fetch('/api/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        path: path,
+        fullDisk: fullDisk,
+        useExcludes: $('excludeToggle').checked,
+      }),
+    });
+    const data = await res.json();
+
+    if (data.status === 'elevation_required') {
+      $('overlay').style.display = 'none';
+      $('elevateMsg').textContent = data.message;
+      $('elevateBanner').classList.add('show');
+      $('status').textContent = 'Elevation required';
+      $('status').className = 'status';
+      return;
+    }
+
+    currentData = data.root;
+    currentPath = data.root.path;
+    zoomStack = [];
+    renderTreemap(data.root);
+    updateBreadcrumbs([data.root]);
+    $('status').textContent = `Done — ${fmt(data.root.size)} total`;
+    $('status').className = 'status ready';
+    $('legend').style.display = 'block';
+  } catch (e) {
+    $('status').textContent = 'Error: ' + e.message;
+    $('status').className = 'status';
+  } finally {
+    $('overlay').style.display = 'none';
+  }
+}
+
+function renderTreemap(rootData) {
+  const container = $('chart');
+  const width = container.clientWidth;
+  const height = container.clientHeight;
+
+  d3.select('#chart svg').remove();
+
+  const svg = d3.select('#chart')
+    .insert('svg', '.tooltip')
+    .attr('viewBox', `0 0 ${width} ${height}`);
+
+  // Build hierarchy
+  function buildHierarchy(node) {
+    const h = { name: node.name, path: node.path, size: node.size, isDir: node.isDir, _node: node };
+    if (node.children && node.children.length > 0) {
+      h.children = node.children.map(buildHierarchy);
+    }
+    return h;
+  }
+
+  const hierarchy = d3.hierarchy(buildHierarchy(rootData))
+    .sum(d => d.size || 0)
+    .sort((a, b) => b.value - a.value);
+
+  const treemap = d3.treemap()
+    .size([width, height])
+    .paddingTop(2)
+    .paddingRight(2)
+    .paddingBottom(2)
+    .paddingLeft(2)
+    .round(true);
+
+  treemap(hierarchy);
+
+  // Color scale based on size
+  const maxSize = hierarchy.value || 1;
+  const colorScale = d3.scaleSequentialLog(
+    [1, maxSize],
+    d3.interpolateBlues
+  );
+
+  const cell = svg.selectAll('g')
+    .data(hierarchy.leaves())
+    .join('g')
+    .attr('transform', d => `translate(${d.x0},${d.y0})`);
+
+  cell.append('rect')
+    .attr('class', 'node')
+    .attr('width', d => Math.max(0, d.x1 - d.x0))
+    .attr('height', d => Math.max(0, d.y1 - d.y0))
+    .attr('fill', d => {
+      if (!d.data.isDir) return '#4a5568';
+      const ratio = (d.value || 0) / maxSize;
+      return d3.interpolateBlues(0.3 + ratio * 0.7);
+    })
+    .attr('rx', 2)
+    .on('mouseover', (e, d) => {
+      const tt = $('tooltip');
+      tt.innerHTML = `
+        <div class="name">${d.data.name}</div>
+        <div class="size">${fmt(d.value || 0)}</div>
+        <div class="path">${d.data.path}</div>
+      `;
+      tt.style.display = 'block';
+      tt.style.left = (e.offsetX + 16) + 'px';
+      tt.style.top = (e.offsetY - 10) + 'px';
+    })
+    .on('mousemove', (e) => {
+      const tt = $('tooltip');
+      tt.style.left = (e.offsetX + 16) + 'px';
+      tt.style.top = (e.offsetY - 10) + 'px';
+    })
+    .on('mouseout', () => { $('tooltip').style.display = 'none'; })
+    .on('click', (e, d) => {
+      if (d.data.isDir && d.data._node && d.data._node.children && d.data._node.children.length > 0) {
+        zoomStack.push({ node: rootData, path: currentPath });
+        currentPath = d.data.path;
+        renderTreemap(d.data._node);
+        updateBreadcrumbs([...zoomStack.map(z => z.node), d.data._node]);
+      }
+    });
+
+  // Labels
+  cell.append('text')
+    .attr('class', d => {
+      const w = d.x1 - d.x0;
+      const h = d.y1 - d.y0;
+      return (w < 40 || h < 16) ? 'node-label small' : 'node-label';
+    })
+    .attr('x', 4)
+    .attr('y', 14)
+    .text(d => {
+      const w = d.x1 - d.x0;
+      if (w < 30) return '';
+      const name = d.data.name;
+      return name.length > 20 ? name.slice(0, 18) + '..' : name;
+    })
+    .style('display', d => {
+      const w = d.x1 - d.x0;
+      const h = d.y1 - d.y0;
+      return (w < 30 || h < 14) ? 'none' : 'block';
+    });
+}
+
+function updateBreadcrumbs(nodes) {
+  const bc = $('breadcrumbs');
+  bc.innerHTML = '';
+  nodes.forEach((n, i) => {
+    if (i > 0) {
+      const sep = document.createElement('span');
+      sep.className = 'sep';
+      sep.textContent = ' / ';
+      bc.appendChild(sep);
+    }
+    const crumb = document.createElement('span');
+    crumb.className = 'crumb' + (i === nodes.length - 1 ? ' current' : '');
+    crumb.textContent = n.name || n.path;
+    if (i < nodes.length - 1) {
+      crumb.addEventListener('click', () => {
+        // Pop zoom stack back to this level
+        zoomStack = zoomStack.slice(0, i);
+        currentPath = n.path;
+        // Re-render from the appropriate node
+        let target = currentData;
+        for (let j = 1; j <= i; j++) {
+          const nextName = nodes[j].name;
+          target = target.children.find(c => c.name === nextName);
+          if (!target) break;
+        }
+        if (target) {
+          renderTreemap(target);
+          updateBreadcrumbs(nodes.slice(0, i + 1));
+        }
+      });
+    }
+    bc.appendChild(crumb);
+  });
+}
+
+// Event handlers
+$('scanBtn').addEventListener('click', () => {
+  const path = $('pathInput').value || '';
+  scan(path || '', false);
+});
+
+$('fullDiskBtn').addEventListener('click', () => {
+  scan('/', true);
+});
+
+$('refreshBtn').addEventListener('click', () => {
+  if (currentPath) scan(currentPath, false);
+});
+
+$('elevateBtn').addEventListener('click', async () => {
+  try {
+    await fetch('/api/elevate?path=/');
+    $('status').textContent = 'Elevated — scanning...';
+    setTimeout(() => scan('/', true), 2000);
+  } catch (e) {
+    $('status').textContent = 'Elevation failed: ' + e.message;
+  }
+});
+
+$('pathInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') scan($('pathInput').value || '', false);
+});
+
+// Handle resize
+window.addEventListener('resize', () => {
+  if (currentData) renderTreemap(zoomStack.length > 0 ? zoomStack[zoomStack.length - 1].node : currentData);
+});
+
+// Auto-scan home on load
+scan('', false);
+</script>
+</body>
+</html>
