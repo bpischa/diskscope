@@ -126,12 +126,134 @@
   .breadcrumbs .crumb.current { color: var(--text); cursor: default; }
   .breadcrumbs .crumb.current:hover { background: transparent; }
 
+  /* View toggle */
+  .view-toggle {
+    display: flex;
+    background: var(--bg);
+    border-radius: 8px;
+    padding: 2px;
+    gap: 2px;
+  }
+  .view-toggle .vt-btn {
+    padding: 5px 12px;
+    border: none;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    background: transparent;
+    color: var(--text-dim);
+    transition: all 0.15s;
+  }
+  .view-toggle .vt-btn.active {
+    background: var(--accent);
+    color: #fff;
+  }
+  .view-toggle .vt-btn:hover:not(.active) {
+    color: var(--text);
+  }
+
+  /* List view */
+  #listView {
+    flex: 1;
+    overflow-y: auto;
+    display: none;
+  }
+  #listView.active { display: block; }
+
+  .list-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .list-table th {
+    text-align: left;
+    padding: 8px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    color: var(--text-dim);
+    font-weight: 500;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    cursor: pointer;
+    user-select: none;
+  }
+  .list-table th:hover { color: var(--text); }
+  .list-table th .sort-arrow { margin-left: 4px; font-size: 10px; }
+  .list-table td {
+    padding: 6px 16px;
+    border-bottom: 1px solid rgba(42,45,58,0.4);
+  }
+  .list-table tr:hover td { background: rgba(108,140,255,0.05); }
+  .list-table tr.dir-row { cursor: pointer; }
+  .list-table tr.dir-row:hover td { background: rgba(108,140,255,0.1); }
+
+  .list-name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .list-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+  }
+  .list-icon.dir { color: var(--accent); }
+  .list-icon.file { color: var(--text-dim); }
+  .list-name-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 400px;
+  }
+
+  .size-bar-cell {
+    width: 180px;
+    min-width: 100px;
+  }
+  .size-bar-bg {
+    background: var(--border);
+    border-radius: 3px;
+    height: 6px;
+    position: relative;
+    overflow: hidden;
+  }
+  .size-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    background: var(--accent);
+    min-width: 2px;
+    transition: width 0.3s;
+  }
+  .size-text {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .type-badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: var(--border);
+    color: var(--text-dim);
+  }
+  .type-badge.dir { background: rgba(108,140,255,0.15); color: var(--accent); }
+
   /* Treemap */
   #chart {
     flex: 1;
     overflow: hidden;
     position: relative;
+    display: none;
   }
+  #chart.active { display: block; }
   #chart svg { width: 100%; height: 100%; }
 
   .node {
@@ -238,6 +360,10 @@
 
 <div class="toolbar">
   <label><input type="checkbox" id="excludeToggle" checked /> Exclude common dirs (node_modules, .git, etc.)</label>
+  <div class="view-toggle">
+    <button class="vt-btn active" id="treemapViewBtn">Treemap</button>
+    <button class="vt-btn" id="listViewBtn">List</button>
+  </div>
   <span class="status" id="status">Ready</span>
 </div>
 
@@ -263,6 +389,19 @@
   </div>
 </div>
 
+<div id="listView">
+  <table class="list-table" id="listTable">
+    <thead>
+      <tr>
+        <th data-sort="name">Name <span class="sort-arrow" id="sort-name"></span></th>
+        <th data-sort="type">Type <span class="sort-arrow" id="sort-type"></span></th>
+        <th data-sort="size" class="size-bar-cell">Size <span class="sort-arrow" id="sort-size">▼</span></th>
+      </tr>
+    </thead>
+    <tbody id="listBody"></tbody>
+  </table>
+</div>
+
 <script>
 const $ = id => document.getElementById(id);
 const fmt = bytes => {
@@ -274,8 +413,51 @@ const fmt = bytes => {
 
 let currentData = null;
 let currentPath = '';
-let zoomStack = []; // stack of { node, path }
+let zoomStack = [];
+let currentView = 'treemap'; // 'treemap' | 'list'
+let listSort = { key: 'size', dir: 'desc' };
+let currentListNode = null; // the node whose children are shown in list view
 
+// ── View toggle ──────────────────────────────────────────────
+function setView(view) {
+  currentView = view;
+  $('treemapViewBtn').classList.toggle('active', view === 'treemap');
+  $('listViewBtn').classList.toggle('active', view === 'list');
+  $('chart').classList.toggle('active', view === 'treemap');
+  $('listView').classList.toggle('active', view === 'list');
+  if (view === 'list' && currentData) {
+    if (currentListNode) {
+      renderList(currentListNode);
+    } else {
+      renderList(zoomStack.length > 0 ? zoomStack[zoomStack.length - 1].node : currentData);
+    }
+  }
+  if (view === 'treemap' && currentData) {
+    renderTreemap(zoomStack.length > 0 ? zoomStack[zoomStack.length - 1].node : currentData);
+  }
+}
+
+$('treemapViewBtn').addEventListener('click', () => setView('treemap'));
+$('listViewBtn').addEventListener('click', () => setView('list'));
+
+// ── Sorting ──────────────────────────────────────────────────
+document.querySelectorAll('.list-table th[data-sort]').forEach(th => {
+  th.addEventListener('click', () => {
+    const key = th.dataset.sort;
+    if (listSort.key === key) {
+      listSort.dir = listSort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+      listSort.key = key;
+      listSort.dir = key === 'name' ? 'asc' : 'desc';
+    }
+    // Update arrows
+    document.querySelectorAll('.list-table th .sort-arrow').forEach(s => s.textContent = '');
+    $(`sort-${key}`).textContent = listSort.dir === 'asc' ? '▲' : '▼';
+    if (currentListNode) renderList(currentListNode);
+  });
+});
+
+// ── Scan ─────────────────────────────────────────────────────
 async function scan(path, fullDisk) {
   $('overlay').style.display = 'flex';
   $('status').textContent = 'Scanning...';
@@ -306,11 +488,17 @@ async function scan(path, fullDisk) {
     currentData = data.root;
     currentPath = data.root.path;
     zoomStack = [];
-    renderTreemap(data.root);
+    currentListNode = data.root;
     updateBreadcrumbs([data.root]);
     $('status').textContent = `Done — ${fmt(data.root.size)} total`;
     $('status').className = 'status ready';
     $('legend').style.display = 'block';
+
+    if (currentView === 'treemap') {
+      renderTreemap(data.root);
+    } else {
+      renderList(data.root);
+    }
   } catch (e) {
     $('status').textContent = 'Error: ' + e.message;
     $('status').className = 'status';
@@ -319,6 +507,65 @@ async function scan(path, fullDisk) {
   }
 }
 
+// ── List view ────────────────────────────────────────────────
+function renderList(node) {
+  currentListNode = node;
+  const tbody = $('listBody');
+  tbody.innerHTML = '';
+
+  const children = (node.children || []).slice();
+  const totalSize = node.size || 1;
+
+  // Sort
+  children.sort((a, b) => {
+    let cmp = 0;
+    switch (listSort.key) {
+      case 'name': cmp = a.name.localeCompare(b.name); break;
+      case 'type': cmp = (a.isDir === b.isDir) ? 0 : a.isDir ? -1 : 1; break;
+      case 'size': cmp = a.size - b.size; break;
+    }
+    return listSort.dir === 'asc' ? cmp : -cmp;
+  });
+
+  for (const child of children) {
+    const tr = document.createElement('tr');
+    const pct = totalSize > 0 ? ((child.size || 0) / totalSize * 100) : 0;
+
+    if (child.isDir) tr.className = 'dir-row';
+
+    tr.innerHTML = `
+      <td>
+        <div class="list-name">
+          <span class="list-icon ${child.isDir ? 'dir' : 'file'}">${child.isDir ? '📁' : '📄'}</span>
+          <span class="list-name-text" title="${child.name}">${child.name}</span>
+        </div>
+      </td>
+      <td><span class="type-badge ${child.isDir ? 'dir' : ''}">${child.isDir ? 'Folder' : 'File'}</span></td>
+      <td class="size-bar-cell">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="size-bar-bg" style="flex:1">
+            <div class="size-bar-fill" style="width:${Math.max(pct, 0.5)}%"></div>
+          </div>
+          <span class="size-text" style="width:60px;text-align:right">${fmt(child.size || 0)}</span>
+        </div>
+      </td>
+    `;
+
+    if (child.isDir && child.children && child.children.length > 0) {
+      tr.addEventListener('click', () => {
+        zoomStack.push({ node: currentListNode, path: currentPath });
+        currentPath = child.path;
+        currentListNode = child;
+        updateBreadcrumbs([...zoomStack.map(z => z.node), child]);
+        renderList(child);
+      });
+    }
+
+    tbody.appendChild(tr);
+  }
+}
+
+// ── Treemap ──────────────────────────────────────────────────
 function renderTreemap(rootData) {
   const container = $('chart');
   const width = container.clientWidth;
@@ -330,7 +577,6 @@ function renderTreemap(rootData) {
     .insert('svg', '.tooltip')
     .attr('viewBox', `0 0 ${width} ${height}`);
 
-  // Build hierarchy
   function buildHierarchy(node) {
     const h = { name: node.name, path: node.path, size: node.size, isDir: node.isDir, _node: node };
     if (node.children && node.children.length > 0) {
@@ -353,12 +599,7 @@ function renderTreemap(rootData) {
 
   treemap(hierarchy);
 
-  // Color scale based on size
   const maxSize = hierarchy.value || 1;
-  const colorScale = d3.scaleSequentialLog(
-    [1, maxSize],
-    d3.interpolateBlues
-  );
 
   const cell = svg.selectAll('g')
     .data(hierarchy.leaves())
@@ -401,7 +642,6 @@ function renderTreemap(rootData) {
       }
     });
 
-  // Labels
   cell.append('text')
     .attr('class', d => {
       const w = d.x1 - d.x0;
@@ -423,6 +663,7 @@ function renderTreemap(rootData) {
     });
 }
 
+// ── Breadcrumbs ──────────────────────────────────────────────
 function updateBreadcrumbs(nodes) {
   const bc = $('breadcrumbs');
   bc.innerHTML = '';
@@ -438,10 +679,8 @@ function updateBreadcrumbs(nodes) {
     crumb.textContent = n.name || n.path;
     if (i < nodes.length - 1) {
       crumb.addEventListener('click', () => {
-        // Pop zoom stack back to this level
         zoomStack = zoomStack.slice(0, i);
         currentPath = n.path;
-        // Re-render from the appropriate node
         let target = currentData;
         for (let j = 1; j <= i; j++) {
           const nextName = nodes[j].name;
@@ -449,7 +688,12 @@ function updateBreadcrumbs(nodes) {
           if (!target) break;
         }
         if (target) {
-          renderTreemap(target);
+          currentListNode = target;
+          if (currentView === 'treemap') {
+            renderTreemap(target);
+          } else {
+            renderList(target);
+          }
           updateBreadcrumbs(nodes.slice(0, i + 1));
         }
       });
@@ -458,7 +702,7 @@ function updateBreadcrumbs(nodes) {
   });
 }
 
-// Event handlers
+// ── Event handlers ───────────────────────────────────────────
 $('scanBtn').addEventListener('click', () => {
   const path = $('pathInput').value || '';
   scan(path || '', false);
@@ -488,7 +732,9 @@ $('pathInput').addEventListener('keydown', (e) => {
 
 // Handle resize
 window.addEventListener('resize', () => {
-  if (currentData) renderTreemap(zoomStack.length > 0 ? zoomStack[zoomStack.length - 1].node : currentData);
+  if (currentData && currentView === 'treemap') {
+    renderTreemap(zoomStack.length > 0 ? zoomStack[zoomStack.length - 1].node : currentData);
+  }
 });
 
 // Auto-scan home on load
