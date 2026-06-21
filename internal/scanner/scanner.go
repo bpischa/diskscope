@@ -124,6 +124,8 @@ func scanDir(node *FileInfo, path string, opts ScanOptions, excludeSet map[strin
 				defer wg.Done()
 				var dirSize atomic.Int64
 				scanDir(child, fullPath, opts, excludeSet, depth+1, &dirSize)
+				child.Size = dirSize.Load()
+				totalSize.Add(child.Size)
 				mu.Lock()
 				results = append(results, entryResult{child, dirSize.Load()})
 				mu.Unlock()

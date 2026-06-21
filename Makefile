@@ -1,4 +1,4 @@
-.PHONY: build build-windows build-linux build-macos-arm run clean
+.PHONY: build build-windows build-linux build-macos-arm run clean test
 
 BINARY=diskscope
 
@@ -16,6 +16,9 @@ build-macos-arm:
 
 run: build
 	./$(BINARY)
+
+test:
+	go test -v ./...
 
 clean:
 	rm -rf $(BINARY) $(BINARY).exe $(BINARY)-linux $(BINARY)-arm64
