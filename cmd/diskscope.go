@@ -8,9 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
-	"strings"
 
 	"github.com/bpischa/diskscope/internal/scanner"
 )
@@ -30,16 +28,6 @@ type scanResponse struct {
 func main() {
 	port := flag.String("port", "8765", "Port to listen on")
 	flag.Parse()
-
-	// If elevated scan was requested via restart, handle it
-	if os.Getenv("DISKSCOPE_ELEVATED") == "1" {
-		path := os.Getenv("DISKSCOPE_PATH")
-		if path == "" {
-			path = "/"
-		}
-		doScanAndServe(path, true)
-		return
-	}
 
 	http.HandleFunc("/api/scan", handleScan)
 	http.HandleFunc("/api/elevate", handleElevate)
@@ -63,7 +51,10 @@ func handleScan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Path == "" {
-		home, _ := os.UserHomeDir()
+		home, err := os.UserHomeDir()
+		if err != nil {
+			home = "."
+		}
 		req.Path = home
 	}
 
@@ -107,30 +98,13 @@ func doScan(w http.ResponseWriter, path string, useExcludes bool, excludeList []
 	})
 }
 
-func doScanAndServe(path string, useExcludes bool) {
-	excludes := scanner.DefaultExcludes
-	opts := scanner.ScanOptions{
-		Root:        path,
-		Exclude:     excludes,
-		UseExcludes: useExcludes,
-	}
-	root, err := scanner.Scan(opts)
-	if err != nil {
-		log.Fatal(err)
-	}
-	w := &nopResponseWriter{}
-	json.NewEncoder(w).Encode(scanResponse{Root: root})
-}
-
-type nopResponseWriter struct{}
-
-func (n *nopResponseWriter) Header() http.Header { return http.Header{} }
-func (n *nopResponseWriter) Write(b []byte) (int, error) { return len(b), nil }
-func (n *nopResponseWriter) WriteHeader(code int) {}
-
 func handleElevate(w http.ResponseWriter, r *http.Request) {
 	if runtime.GOOS == "windows" {
-		http.Error(w, "On Windows, please restart the app as Administrator", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "error",
+			"message": "On Windows, please right-click the app and select 'Run as administrator'",
+		})
 		return
 	}
 
@@ -160,40 +134,4 @@ func handleElevate(w http.ResponseWriter, r *http.Request) {
 		"status":  "elevating",
 		"message": "Restarting with elevated permissions...",
 	})
-}
-
-func getDisks() []string {
-	var disks []string
-	switch runtime.GOOS {
-	case "darwin":
-		entries, _ := os.ReadDir("/Volumes")
-		for _, e := range entries {
-			disks = append(disks, filepath.Join("/Volumes", e.Name()))
-		}
-		disks = append(disks, "/")
-	case "linux":
-		// Read /proc/mounts or /etc/mtab
-		data, err := os.ReadFile("/proc/mounts")
-		if err == nil {
-			seen := map[string]bool{}
-			for _, line := range strings.Split(string(data), "\n") {
-				parts := strings.Fields(line)
-				if len(parts) >= 2 {
-					mount := parts[1]
-					if strings.HasPrefix(mount, "/") && !seen[mount] {
-						seen[mount] = true
-						disks = append(disks, mount)
-					}
-				}
-			}
-		}
-	case "windows":
-		for _, drive := range "ABCDEFGHIJKLMNOPQRSTUVWXYZ" {
-			path := string(drive) + ":\\"
-			if _, err := os.Stat(path); err == nil {
-				disks = append(disks, path)
-			}
-		}
-	}
-	return disks
 }

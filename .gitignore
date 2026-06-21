@@ -1,1 +1,18 @@
+# Binaries
 diskscope
+diskscope.exe
+diskscope-linux
+diskscope-arm64
+
+# Go
+go.sum
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
